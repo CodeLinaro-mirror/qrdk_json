@@ -25126,6 +25126,27 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
         return j;
     }
 
+    /// @brief restore the parent pointers after erasing from an object
+    /// ordered_json keeps its members in a vector, and erasing a member
+    /// re-constructs every member after it in place, which resets their
+    /// parent pointers
+    void set_parents_after_object_erase()
+    {
+#if JSON_DIAGNOSTICS
+#ifdef JSON_HEDLEY_MSVC_VERSION
+#pragma warning(push )
+#pragma warning(disable : 4127) // ignore warning to replace if with if constexpr
+#endif
+        if (detail::is_ordered_map<object_t>::value)
+        {
+            set_parents();
+        }
+#ifdef JSON_HEDLEY_MSVC_VERSION
+#pragma warning( pop )
+#endif
+#endif
+    }
+
   public:
     //////////////////////////
     // JSON parser callback //
@@ -26859,6 +26880,7 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
             case value_t::object:
             {
                 result.m_it.object_iterator = erase_from_object(pos.m_it.object_iterator);
+                set_parents_after_object_erase();
                 break;
             }
 
@@ -26931,6 +26953,7 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
             {
                 result.m_it.object_iterator = m_data.m_value.object->erase(first.m_it.object_iterator,
                                               last.m_it.object_iterator);
+                set_parents_after_object_erase();
                 break;
             }
 
@@ -26961,7 +26984,9 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
             JSON_THROW(type_error::create(307, detail::concat("cannot use erase() with ", type_name()), this));
         }
 
-        return m_data.m_value.object->erase(std::forward<KeyType>(key));
+        const auto erased = m_data.m_value.object->erase(std::forward<KeyType>(key));
+        set_parents_after_object_erase();
+        return erased;
     }
 
     template < typename KeyType, detail::enable_if_t <
@@ -26978,6 +27003,7 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
         if (it != m_data.m_value.object->end())
         {
             m_data.m_value.object->erase(it);
+            set_parents_after_object_erase();
             return 1;
         }
         return 0;
@@ -27852,16 +27878,12 @@ class basic_json // NOLINT(cppcoreguidelines-special-member-functions,hicpp-spec
                 if (it2 != m_data.m_value.object->end() && it2->second.is_object())
                 {
                     it2->second.update(it.value(), true);
-#if JSON_DIAGNOSTICS
-                    it2->second.set_parents();
-#endif
                     continue;
                 }
             }
-            m_data.m_value.object->operator[](it.key()) = it.value();
-#if JSON_DIAGNOSTICS
-            m_data.m_value.object->operator[](it.key()).m_parent = this;
-#endif
+            // set_parent() also repairs the other members, which ordered_json
+            // relocates when adding a key makes its vector grow
+            set_parent(m_data.m_value.object->operator[](it.key()) = it.value());
         }
     }
 
