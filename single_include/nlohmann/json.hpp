@@ -30471,7 +30471,60 @@ public:
 #else
         static_cast<void>(old_capacity);
 #endif
-        return set_parent(j);
+        set_parent_plain(j);
+        return j;
+    }
+
+    /// @brief capacity of the stored object if it is vector-backed (ordered_map), else 0
+#if JSON_DIAGNOSTICS
+    template < typename O = object_t, detail::enable_if_t < detail::has_capacity<O>::value, int > = 0 >
+    std::size_t object_capacity() const noexcept
+    {
+        return m_data.m_value.object->capacity();
+    }
+
+    template < typename O = object_t, detail::enable_if_t < !detail::has_capacity<O>::value, int > = 0 >
+    std::size_t object_capacity() const noexcept
+    {
+        return 0;
+    }
+#else
+    static constexpr std::size_t object_capacity() noexcept
+    {
+        return 0;
+    }
+#endif
+
+    /// @brief set parent of an element that was just looked up or inserted into an object
+    reference set_parent_after_object_emplace(reference j, std::size_t old_capacity)
+    {
+#if JSON_DIAGNOSTICS
+        if (JSON_HEDLEY_UNLIKELY(object_capacity() != old_capacity))
+        {
+            set_parents();
+            return j;
+        }
+        j.m_parent = this;
+#else
+        static_cast<void>(old_capacity);
+#endif
+        return j;
+    }
+
+    void set_parent_plain(reference j) noexcept
+    {
+#if JSON_DIAGNOSTICS
+        j.m_parent = this;
+#else
+        static_cast<void>(j);
+#endif
+    }
+
+    /// @brief set the parent of an element accessed via at(); never moves elements
+    reference set_parent_at(reference j) noexcept
+    {
+        set_parent_plain(j);
+        return j;
     }
 
     reference set_parent(reference j)
@@ -31905,7 +31958,6 @@ public:
             copy_leaf_value(other, *this);
         }
 
-        set_parents();
         assert_invariant();
     }
 
@@ -32793,7 +32845,7 @@ public:
     /// @sa https://json.nlohmann.me/api/basic_json/at/
     reference at(size_type idx)
     {
-        return set_parent(array_at(*this, idx));
+        return set_parent_at(array_at(*this, idx));
     }
 
     /// @brief access specified array element with bounds checking
@@ -32807,7 +32859,7 @@ public:
     /// @sa https://json.nlohmann.me/api/basic_json/at/
     reference at(const typename object_t::key_type& key)
     {
-        return set_parent(object_at(*this, key));
+        return set_parent_at(object_at(*this, key));
     }
 
     /// @brief access specified object element with bounds checking
@@ -32816,7 +32868,7 @@ public:
                  detail::is_usable_as_basic_json_key_type<basic_json_t, KeyType>::value, int> = 0>
     reference at(KeyType && key)
     {
-        return set_parent(object_at(*this, std::forward<KeyType>(key)));
+        return set_parent_at(object_at(*this, std::forward<KeyType>(key)));
     }
 
     /// @brief access specified object element with bounds checking
@@ -32914,8 +32966,9 @@ public:
         // operator[] only works for objects
         if (JSON_HEDLEY_LIKELY(is_object()))
         {
+            const auto old_capacity = object_capacity();
             auto result = m_data.m_value.object->emplace(std::move(key), nullptr);
-            return set_parent(result.first->second);
+            return set_parent_after_object_emplace(result.first->second, old_capacity);
         }
 
         throw_subscript_wrong_type("string");
@@ -32965,8 +33018,9 @@ public:
         // operator[] only works for objects
         if (JSON_HEDLEY_LIKELY(is_object()))
         {
+            const auto old_capacity = object_capacity();
             auto result = m_data.m_value.object->emplace(lookup_key(std::forward<KeyType>(key)), nullptr);
-            return set_parent(result.first->second);
+            return set_parent_after_object_emplace(result.first->second, old_capacity);
         }
 
         throw_subscript_wrong_type("string");
@@ -33933,8 +33987,9 @@ public:
         }
 
         // add the element to the object
+        const auto old_capacity = object_capacity();
         auto res = m_data.m_value.object->insert(val);
-        set_parent(res.first->second);
+        set_parent_after_object_emplace(res.first->second, old_capacity);
     }
 
     /// @brief add an object to an object
@@ -34010,8 +34065,9 @@ public:
         }
 
         // add the element to the array (perfect forwarding)
+        const auto old_capacity = object_capacity();
         auto res = m_data.m_value.object->emplace(std::forward<Args>(args)...);
-        set_parent(res.first->second);
+        set_parent_after_object_emplace(res.first->second, old_capacity);
 
         // create a result iterator and set iterator to the result of emplace
         auto it = begin();

@@ -13,9 +13,11 @@
 #endif
 
 #define JSON_DIAGNOSTICS 1
+#define JSON_TESTS_PRIVATE
 
 #include <nlohmann/json.hpp>
 using nlohmann::json;
+using nlohmann::ordered_json;
 
 #include <map>
 #include <unordered_map>
@@ -629,5 +631,101 @@ TEST_CASE("Better diagnostics past the descent bound of update(), merge_patch() 
         }
         CHECK(p->at("x").is_null());
         CHECK_THROWS_WITH_AS(p->at("y").at(0), expected_y.c_str(), json::type_error);
+    }
+}
+
+namespace
+{
+// check that every child's parent pointer points to the containing value
+template<typename BasicJsonType>
+bool parents_consistent(const BasicJsonType& j)
+{
+    bool ok = true;
+    if (j.is_array() || j.is_object())
+    {
+        for (const auto& child : j)
+        {
+            ok = ok && child.m_parent == &j && parents_consistent(child);
+        }
+    }
+    return ok;
+}
+} // namespace
+
+TEST_CASE_TEMPLATE("Parent pointers stay consistent", J, json, ordered_json)
+{
+    SECTION("parse, copy, move, assign, swap")
+    {
+        J j = J::parse(R"({"a":[1,{"b":[2,3]},[4]],"c":{"d":{"e":[]}}})");
+        CHECK(parents_consistent(j));
+
+        J copy(j);
+        CHECK(parents_consistent(copy));
+
+        J moved(std::move(copy));
+        CHECK(parents_consistent(moved));
+
+        J assigned;
+        assigned = j;
+        CHECK(parents_consistent(assigned));
+
+        J other = {1, 2, {{"k", J::array({1, 2})}}};
+        other.swap(assigned);
+        CHECK(parents_consistent(other));
+        CHECK(parents_consistent(assigned));
+    }
+
+    SECTION("push_back growth")
+    {
+        J arr = J::array();
+        for (int i = 0; i < 500; ++i)
+        {
+            arr.push_back(J::array({i}));
+        }
+        CHECK(parents_consistent(arr));
+
+        J obj = J::object();
+        for (int i = 0; i < 500; ++i)
+        {
+            obj.push_back({std::to_string(i), J::array({i})});
+        }
+        CHECK(parents_consistent(obj));
+    }
+
+    SECTION("emplace_back and emplace growth")
+    {
+        J arr = J::array();
+        J obj = J::object();
+        for (int i = 0; i < 500; ++i)
+        {
+            arr.emplace_back(J::array({i}));
+            obj.emplace(std::to_string(i), J::array({i}));
+        }
+        CHECK(parents_consistent(arr));
+        CHECK(parents_consistent(obj));
+    }
+
+    SECTION("operator[] growth and at()")
+    {
+        J obj = J::object();
+        for (int i = 0; i < 500; ++i)
+        {
+            obj[std::to_string(i)] = J::array({i});
+            CHECK(obj[std::to_string(i / 2)].m_parent == &obj);
+        }
+        CHECK(parents_consistent(obj));
+
+        J arr = J::array();
+        for (int i = 0; i < 500; ++i)
+        {
+            arr[static_cast<size_t>(i)] = J::object({{"x", i}});
+        }
+        for (size_t i = 0; i < 500; ++i)
+        {
+            CHECK(arr.at(i).m_parent == &arr);
+        }
+        CHECK(obj.at("3").m_parent == &obj);
+        CHECK(parents_consistent(arr));
+        CHECK(parents_consistent(obj));
     }
 }
