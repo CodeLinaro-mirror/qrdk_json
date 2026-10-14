@@ -280,6 +280,11 @@ class iter_impl // NOLINT(cppcoreguidelines-special-member-functions,hicpp-speci
     }
 
     /// @throw invalid_iterator.214 always
+    JSON_HEDLEY_NEVER_INLINE JSON_HEDLEY_NO_RETURN void throw_compare_different_values() const
+    {
+        JSON_THROW(invalid_iterator::create(exception_id::iterators_compare_different_values, "cannot compare iterators of different containers", m_object));
+    }
+
     JSON_HEDLEY_NO_RETURN void throw_cannot_get_value() const
     {
         JSON_THROW(invalid_iterator::create(exception_id::iterator_value_unavailable, "cannot get value", m_object));
@@ -293,6 +298,18 @@ class iter_impl // NOLINT(cppcoreguidelines-special-member-functions,hicpp-speci
     reference operator*() const
     {
         JSON_ASSERT(m_object != nullptr);
+
+        if (JSON_HEDLEY_LIKELY(m_object->m_data.m_type == value_t::array))
+        {
+            JSON_ASSERT(m_it.array_iterator != m_object->m_data.m_value.array->end());
+            return *m_it.array_iterator;
+        }
+
+        if (JSON_HEDLEY_LIKELY(m_object->m_data.m_type == value_t::object))
+        {
+            JSON_ASSERT(m_it.object_iterator != m_object->m_data.m_value.object->end());
+            return m_it.object_iterator->second;
+        }
 
         switch (m_object->m_data.m_type)
         {
@@ -337,6 +354,12 @@ class iter_impl // NOLINT(cppcoreguidelines-special-member-functions,hicpp-speci
     pointer operator->() const
     {
         JSON_ASSERT(m_object != nullptr);
+
+        if (JSON_HEDLEY_LIKELY(m_object->m_data.m_type == value_t::array))
+        {
+            JSON_ASSERT(m_it.array_iterator != m_object->m_data.m_value.array->end());
+            return &*m_it.array_iterator;
+        }
 
         switch (m_object->m_data.m_type)
         {
@@ -390,6 +413,18 @@ class iter_impl // NOLINT(cppcoreguidelines-special-member-functions,hicpp-speci
     iter_impl& operator++()
     {
         JSON_ASSERT(m_object != nullptr);
+
+        if (JSON_HEDLEY_LIKELY(m_object->m_data.m_type == value_t::array))
+        {
+            ++m_it.array_iterator;
+            return *this;
+        }
+
+        if (JSON_HEDLEY_LIKELY(m_object->m_data.m_type == value_t::object))
+        {
+            std::advance(m_it.object_iterator, 1);
+            return *this;
+        }
 
         switch (m_object->m_data.m_type)
         {
@@ -484,13 +519,23 @@ class iter_impl // NOLINT(cppcoreguidelines-special-member-functions,hicpp-speci
         // if objects are not the same, the comparison is undefined
         if (JSON_HEDLEY_UNLIKELY(m_object != other.m_object))
         {
-            JSON_THROW(invalid_iterator::create(exception_id::iterators_compare_different_values, "cannot compare iterators of different containers", m_object));
+            throw_compare_different_values();
         }
 
         // value-initialized forward iterators can be compared, and must compare equal to other value-initialized iterators of the same type #4493
         if (m_object == nullptr)
         {
             return true;
+        }
+
+        if (JSON_HEDLEY_LIKELY(m_object->m_data.m_type == value_t::array))
+        {
+            return (m_it.array_iterator == other.m_it.array_iterator);
+        }
+
+        if (JSON_HEDLEY_LIKELY(m_object->m_data.m_type == value_t::object))
+        {
+            return (m_it.object_iterator == other.m_it.object_iterator);
         }
 
         switch (m_object->m_data.m_type)
