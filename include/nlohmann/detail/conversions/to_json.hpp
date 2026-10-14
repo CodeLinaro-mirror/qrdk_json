@@ -167,6 +167,17 @@ struct external_constructor<value_t::array>
         j.replace_value(value_t::array, value);
     }
 
+    /// an rvalue container: move its elements
+    template<typename BasicJsonType, typename CompatibleArrayType>
+    static void construct_moving(BasicJsonType& j, CompatibleArrayType& arr)
+    {
+        using std::begin;
+        using std::end;
+
+        const typename BasicJsonType::json_value value(j.template create<typename BasicJsonType::array_t>(std::make_move_iterator(begin(arr)), std::make_move_iterator(end(arr))));
+        j.replace_value(value_t::array, value);
+    }
+
     template<typename BasicJsonType>
     static void construct(BasicJsonType& j, const std::vector<bool>& arr)
     {
@@ -214,6 +225,17 @@ struct external_constructor<value_t::object>
     static void construct(BasicJsonType& j, typename BasicJsonType::object_t&& obj)
     {
         const typename BasicJsonType::json_value value(std::move(obj));
+        j.replace_value(value_t::object, value);
+    }
+
+    /// an rvalue container: move its values
+    template<typename BasicJsonType, typename CompatibleObjectType>
+    static void construct_moving(BasicJsonType& j, CompatibleObjectType& obj)
+    {
+        using std::begin;
+        using std::end;
+
+        const typename BasicJsonType::json_value value(j.template create<typename BasicJsonType::object_t>(std::make_move_iterator(begin(obj)), std::make_move_iterator(end(obj))));
         j.replace_value(value_t::object, value);
     }
 
@@ -354,6 +376,45 @@ inline void to_json(BasicJsonType& j, const CompatibleArrayType& arr)
     external_constructor<value_t::array>::construct(j, arr);
 }
 
+#if defined(__cpp_lib_char8_t)
+// std::basic_string<char8_t> is converted to a string by a dedicated to_json overload
+template<typename T>
+struct is_u8string : std::false_type {};
+
+template<typename Tr, typename Allocator>
+struct is_u8string<std::basic_string<char8_t, Tr, Allocator>> : std::true_type {};
+#endif
+
+// rvalue containers: their elements are moved instead of copied
+template < typename BasicJsonType, typename CompatibleArrayType,
+           enable_if_t < !std::is_lvalue_reference<CompatibleArrayType>::value
+                         && !std::is_const<CompatibleArrayType>::value
+                         && !std::is_same<CompatibleArrayType, typename BasicJsonType::array_t>::value
+                         && !std::is_same<CompatibleArrayType, std::vector<bool>>::value
+                         && !is_basic_json<CompatibleArrayType>::value
+                         && is_compatible_array_type<BasicJsonType, CompatibleArrayType>::value
+                         && !is_compatible_object_type<BasicJsonType, CompatibleArrayType>::value
+                         && !is_compatible_string_type<BasicJsonType, CompatibleArrayType>::value
+                         && !std::is_same<typename BasicJsonType::binary_t, CompatibleArrayType>::value
+                         && !is_compatible_binary_type<BasicJsonType, CompatibleArrayType>::value
+#if JSON_HAS_FILESYSTEM || JSON_HAS_EXPERIMENTAL_FILESYSTEM
+    && !std::is_same<CompatibleArrayType, std_fs::path>::value // has its own to_json
+#endif
+#if defined(__cpp_lib_char8_t)
+    && !is_u8string<CompatibleArrayType>::value // has its own to_json
+#endif
+#if JSON_HAS_RANGE_VIEW_CONVERSION
+    && !is_compatible_range_view<CompatibleArrayType>::value
+#endif
+#if JSON_USE_OBJECTS_FOR_ENUM_KEYED_MAPS
+    && !is_enum_keyed_map<CompatibleArrayType>::value
+#endif
+                         , int > = 0 >
+inline void to_json(BasicJsonType& j, CompatibleArrayType && arr)
+{
+    external_constructor<value_t::array>::construct_moving(j, arr);
+}
+
 #if JSON_HAS_RANGE_VIEW_CONVERSION
 template < typename BasicJsonType, typename T,
            enable_if_t < is_compatible_range_view<std::remove_cvref_t<T>>::value
@@ -426,6 +487,21 @@ inline void to_json(BasicJsonType& j, const EnumKeyedMap& map)
     external_constructor<value_t::object>::construct(j, std::move(obj));
 }
 #endif
+
+template < typename BasicJsonType, typename CompatibleObjectType,
+           enable_if_t < !std::is_lvalue_reference<CompatibleObjectType>::value
+                         && !std::is_const<CompatibleObjectType>::value
+                         && !std::is_same<CompatibleObjectType, typename BasicJsonType::object_t>::value
+                         && is_compatible_object_type<BasicJsonType, CompatibleObjectType>::value
+                         && !is_basic_json<CompatibleObjectType>::value
+#if JSON_USE_OBJECTS_FOR_ENUM_KEYED_MAPS
+    && !is_enum_keyed_map<CompatibleObjectType>::value
+#endif
+                         , int > = 0 >
+inline void to_json(BasicJsonType& j, CompatibleObjectType && obj)
+{
+    external_constructor<value_t::object>::construct_moving(j, obj);
+}
 
 template<typename BasicJsonType>
 inline void to_json(BasicJsonType& j, typename BasicJsonType::object_t&& obj)
