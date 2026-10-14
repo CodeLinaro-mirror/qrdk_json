@@ -5962,6 +5962,22 @@ template<typename ConstructibleArrayType>
 void from_json_array_reserve(ConstructibleArrayType& /*arr*/, std::size_t /*size*/, priority_tag<0> /*unused*/)
 {}
 
+// append through push_back() where available; containers without it (such as
+// std::set) fall back to insert(end(), ...), which is what std::inserter did
+template<typename ConstructibleArrayType, typename ValueType>
+auto from_json_array_append(ConstructibleArrayType& arr, ValueType&& value, priority_tag<1> /*unused*/)
+-> decltype(arr.push_back(std::forward<ValueType>(value)), void())
+{
+    arr.push_back(std::forward<ValueType>(value));
+}
+
+template<typename ConstructibleArrayType, typename ValueType>
+void from_json_array_append(ConstructibleArrayType& arr, ValueType&& value, priority_tag<0> /*unused*/)
+{
+    using std::end;
+    arr.insert(end(arr), std::forward<ValueType>(value));
+}
+
 template<typename BasicJsonType, typename ConstructibleArrayType,
          enable_if_t<
              std::is_assignable<ConstructibleArrayType&, ConstructibleArrayType>::value,
@@ -5971,17 +5987,15 @@ auto from_json_array_impl(const BasicJsonType& j, ConstructibleArrayType& arr, p
     j.template get<typename ConstructibleArrayType::value_type>(),
     void())
 {
-    using std::end;
-
     ConstructibleArrayType ret;
-    from_json_array_reserve(ret, j.size(), priority_tag<1> {});
-    std::transform(j.begin(), j.end(),
-                   std::inserter(ret, end(ret)), [](const BasicJsonType & i)
+    const auto* inner_array = j.template get_ptr<const typename BasicJsonType::array_t*>();
+    from_json_array_reserve(ret, inner_array->size(), priority_tag<1> {});
+    for (const auto& elem : *inner_array)
     {
         // get<BasicJsonType>() returns *this, this won't call a from_json
         // method when value_type is BasicJsonType
-        return i.template get<typename ConstructibleArrayType::value_type>();
-    });
+        from_json_array_append(ret, elem.template get<typename ConstructibleArrayType::value_type>(), priority_tag<1> {});
+    }
     arr = std::move(ret);
 }
 
@@ -32681,6 +32695,22 @@ public:
         return j.m_data.m_value.object->find(lookup_key(std::forward<KeyType>(key)));
     }
 
+    /// @brief out-of-line throw helpers: building the message inline blocks inlining of the hot accessors
+    /// @throw out_of_range.401
+    JSON_HEDLEY_NO_RETURN JSON_HEDLEY_NEVER_INLINE
+    static void throw_array_index_out_of_range(size_type idx, const basic_json& j)
+    {
+        JSON_THROW(out_of_range::create(detail::exception_id::array_index_out_of_range, detail::concat("array index ", std::to_string(idx), " is out of range"), &j));
+    }
+
+    /// @throw out_of_range.403
+    template<typename KeyType>
+    JSON_HEDLEY_NO_RETURN JSON_HEDLEY_NEVER_INLINE
+    static void throw_key_not_found(const KeyType& key, const basic_json& j)
+    {
+        JSON_THROW(out_of_range::create(detail::exception_id::key_not_found, detail::concat("key '", key, "' not found"), &j));
+    }
+
     /// @brief checked object element access used by the at() overloads taking a key
     /// @throw type_error.304 if @a j is not an object
     /// @throw out_of_range.403 if @a key is not found
@@ -32701,7 +32731,7 @@ public:
             // std::map or ordered_map) never moves from its argument, so key is still
             // valid here regardless of whether KeyType was deduced as an rvalue reference
             // NOLINTNEXTLINE(bugprone-use-after-move,hicpp-invalid-access-moved)
-            JSON_THROW(out_of_range::create(detail::exception_id::key_not_found, detail::concat("key '", key_for_message(key), "' not found"), &j));
+            throw_key_not_found(key_for_message(key), j);
         }
         return it->second;
     }
@@ -32738,7 +32768,7 @@ public:
 
         if (JSON_HEDLEY_UNLIKELY(idx >= j.m_data.m_value.array->size()))
         {
-            JSON_THROW(out_of_range::create(detail::exception_id::array_index_out_of_range, detail::concat("array index ", std::to_string(idx), " is out of range"), &j));
+            throw_array_index_out_of_range(idx, j);
         }
 
         return (*j.m_data.m_value.array)[idx];

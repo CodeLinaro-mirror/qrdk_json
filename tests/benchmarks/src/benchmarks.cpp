@@ -9,7 +9,10 @@
 #include <benchmark/benchmark.h>
 #include <nlohmann/json.hpp>
 #include <fstream>
+#include <array>
+#include <deque>
 #include <numeric>
+#include <set>
 #include <vector>
 #include <test_data.hpp>
 
@@ -620,5 +623,52 @@ static void FromCborChunkedString(benchmark::State& state, const std::size_t chu
 }
 
 BENCHMARK_CAPTURE(FromCborChunkedString, 10000 chunks, 10000);
+
+// checked element access (at(i) must inline like operator[])
+static void ArrayAt(benchmark::State& state)
+{
+    json j = json::array();
+    for (int i = 0; i < 1000; ++i)
+    {
+        j.push_back(i);
+    }
+    const json& cj = j;
+
+    for (auto _ : state)
+    {
+        std::int64_t sum = 0;
+        for (std::size_t i = 0; i < 1000; ++i)
+        {
+            sum += cj.at(i).get<int>();
+        }
+        benchmark::DoNotOptimize(sum);
+    }
+    state.SetItemsProcessed(state.iterations() * 1000);
+}
+
+BENCHMARK(ArrayAt);
+
+// conversion of a JSON array into standard containers
+template<typename Container>
+static void GetArray(benchmark::State& state)
+{
+    json j = json::array();
+    for (int i = 0; i < 1000; ++i)
+    {
+        j.push_back(i);
+    }
+
+    for (auto _ : state)
+    {
+        auto c = j.get<Container>();
+        benchmark::DoNotOptimize(c);
+    }
+    state.SetItemsProcessed(state.iterations() * 1000);
+}
+
+BENCHMARK_TEMPLATE(GetArray, std::vector<int>);
+BENCHMARK_TEMPLATE(GetArray, std::deque<int>);
+BENCHMARK_TEMPLATE(GetArray, std::set<int>);
+BENCHMARK_TEMPLATE(GetArray, std::array<int, 1000>);
 
 BENCHMARK_MAIN();

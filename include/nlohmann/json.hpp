@@ -3333,6 +3333,22 @@ public:
         return j.m_data.m_value.object->find(lookup_key(std::forward<KeyType>(key)));
     }
 
+    /// @brief out-of-line throw helpers: building the message inline blocks inlining of the hot accessors
+    /// @throw out_of_range.401
+    JSON_HEDLEY_NO_RETURN JSON_HEDLEY_NEVER_INLINE
+    static void throw_array_index_out_of_range(size_type idx, const basic_json& j)
+    {
+        JSON_THROW(out_of_range::create(detail::exception_id::array_index_out_of_range, detail::concat("array index ", std::to_string(idx), " is out of range"), &j));
+    }
+
+    /// @throw out_of_range.403
+    template<typename KeyType>
+    JSON_HEDLEY_NO_RETURN JSON_HEDLEY_NEVER_INLINE
+    static void throw_key_not_found(const KeyType& key, const basic_json& j)
+    {
+        JSON_THROW(out_of_range::create(detail::exception_id::key_not_found, detail::concat("key '", key, "' not found"), &j));
+    }
+
     /// @brief checked object element access used by the at() overloads taking a key
     /// @throw type_error.304 if @a j is not an object
     /// @throw out_of_range.403 if @a key is not found
@@ -3353,7 +3369,7 @@ public:
             // std::map or ordered_map) never moves from its argument, so key is still
             // valid here regardless of whether KeyType was deduced as an rvalue reference
             // NOLINTNEXTLINE(bugprone-use-after-move,hicpp-invalid-access-moved)
-            JSON_THROW(out_of_range::create(detail::exception_id::key_not_found, detail::concat("key '", key_for_message(key), "' not found"), &j));
+            throw_key_not_found(key_for_message(key), j);
         }
         return it->second;
     }
@@ -3390,7 +3406,7 @@ public:
 
         if (JSON_HEDLEY_UNLIKELY(idx >= j.m_data.m_value.array->size()))
         {
-            JSON_THROW(out_of_range::create(detail::exception_id::array_index_out_of_range, detail::concat("array index ", std::to_string(idx), " is out of range"), &j));
+            throw_array_index_out_of_range(idx, j);
         }
 
         return (*j.m_data.m_value.array)[idx];
