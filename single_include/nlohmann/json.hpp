@@ -20890,19 +20890,74 @@ class json_pointer
     }
 
   private:
+    // The throw sites below are kept out of line, so that the hot functions neither
+    // contain the message construction nor the cleanup code that comes with it.
+
     /// @throw out_of_range.405 always
-    JSON_HEDLEY_NO_RETURN static void throw_no_parent()
+    JSON_HEDLEY_NEVER_INLINE JSON_HEDLEY_NO_RETURN static void throw_no_parent()
     {
         JSON_THROW(detail::out_of_range::create(detail::exception_id::patch_on_root, "JSON pointer has no parent", nullptr));
     }
 
     /// @throw out_of_range.404 always
     template<typename BasicJsonContext>
-    JSON_HEDLEY_NO_RETURN static void throw_unresolved(const string_t& reference_token, BasicJsonContext context)
+    JSON_HEDLEY_NEVER_INLINE JSON_HEDLEY_NO_RETURN static void throw_unresolved(const string_t& reference_token, BasicJsonContext context)
     {
         static_cast<void>(reference_token); // unused when JSON_NOEXCEPTION is defined
         static_cast<void>(context);
         JSON_THROW(detail::out_of_range::create(detail::exception_id::pointer_unresolved, detail::concat("unresolved reference token '", reference_token, "'"), context));
+    }
+
+    /// @throw out_of_range.402 always
+    template<typename BasicJsonContext>
+    JSON_HEDLEY_NEVER_INLINE JSON_HEDLEY_NO_RETURN static void throw_past_the_end(std::size_t size, BasicJsonContext context)
+    {
+        static_cast<void>(size); // unused when JSON_NOEXCEPTION is defined
+        static_cast<void>(context);
+        JSON_THROW(detail::out_of_range::create(detail::exception_id::pointer_past_the_end_index, detail::concat("array index '-' (", std::to_string(size), ") is out of range"), context));
+    }
+
+    /// @throw out_of_range.401 always
+    template<typename BasicJsonContext>
+    JSON_HEDLEY_NEVER_INLINE JSON_HEDLEY_NO_RETURN static void throw_index_out_of_range(std::size_t idx, BasicJsonContext context)
+    {
+        static_cast<void>(idx); // unused when JSON_NOEXCEPTION is defined
+        static_cast<void>(context);
+        JSON_THROW(detail::out_of_range::create(detail::exception_id::array_index_out_of_range, detail::concat("array index ", std::to_string(idx), " is out of range"), context));
+    }
+
+    /// @throw parse_error.106 always
+    JSON_HEDLEY_NEVER_INLINE JSON_HEDLEY_NO_RETURN static void throw_leading_zero(const string_t& s)
+    {
+        static_cast<void>(s); // unused when JSON_NOEXCEPTION is defined
+        JSON_THROW(detail::parse_error::create(detail::exception_id::pointer_index_leading_zero, 0, detail::concat("array index '", s, "' must not begin with '0'"), nullptr));
+    }
+
+    /// @throw parse_error.109 always
+    JSON_HEDLEY_NEVER_INLINE JSON_HEDLEY_NO_RETURN static void throw_not_a_number(const string_t& s)
+    {
+        static_cast<void>(s); // unused when JSON_NOEXCEPTION is defined
+        JSON_THROW(detail::parse_error::create(detail::exception_id::pointer_index_not_a_number, 0, detail::concat("array index '", s, "' is not a number"), nullptr));
+    }
+
+    /// @throw out_of_range.410 always
+    JSON_HEDLEY_NEVER_INLINE JSON_HEDLEY_NO_RETURN static void throw_exceeds_size_type(const string_t& s)
+    {
+        static_cast<void>(s); // unused when JSON_NOEXCEPTION is defined
+        JSON_THROW(detail::out_of_range::create(detail::exception_id::value_out_of_range, detail::concat("array index ", s, " exceeds size_type"), nullptr));
+    }
+
+    /// @throw parse_error.107 always
+    JSON_HEDLEY_NEVER_INLINE JSON_HEDLEY_NO_RETURN static void throw_missing_slash(const string_t& reference_string)
+    {
+        static_cast<void>(reference_string); // unused when JSON_NOEXCEPTION is defined
+        JSON_THROW(detail::parse_error::create(detail::exception_id::pointer_missing_slash, 1, detail::concat("JSON pointer must be empty or begin with '/' - was: '", reference_string, "'"), nullptr));
+    }
+
+    /// @throw parse_error.108 always
+    JSON_HEDLEY_NEVER_INLINE JSON_HEDLEY_NO_RETURN static void throw_invalid_escape()
+    {
+        JSON_THROW(detail::parse_error::create(detail::exception_id::pointer_invalid_escape, 0, "escape character '~' must be followed with '0' or '1'", nullptr));
     }
 
     /*!
@@ -21013,16 +21068,14 @@ class json_pointer
         typename BasicJsonType::size_type idx{};
         switch (parse_array_index<BasicJsonType>(s, idx))
         {
-            // the branches differ in their messages, not after JSON_THROW's expansion
-            // NOLINTNEXTLINE(bugprone-branch-clone)
             case array_index_status::leading_zero:
-                JSON_THROW(detail::parse_error::create(detail::exception_id::pointer_index_leading_zero, 0, detail::concat("array index '", s, "' must not begin with '0'"), nullptr));
+                throw_leading_zero(s);
             case array_index_status::not_a_number:
-                JSON_THROW(detail::parse_error::create(detail::exception_id::pointer_index_not_a_number, 0, detail::concat("array index '", s, "' is not a number"), nullptr));
+                throw_not_a_number(s);
             case array_index_status::unresolved:
                 throw_unresolved(s, nullptr);
             case array_index_status::exceeds_size_type:
-                JSON_THROW(detail::out_of_range::create(detail::exception_id::value_out_of_range, detail::concat("array index ", s, " exceeds size_type"), nullptr));
+                throw_exceeds_size_type(s);
             case array_index_status::ok:
             default:
                 break;
@@ -21046,7 +21099,7 @@ class json_pointer
 
         if (JSON_HEDLEY_UNLIKELY(reference_string[0] != '/'))
         {
-            JSON_THROW(detail::parse_error::create(detail::exception_id::pointer_missing_slash, 1, detail::concat("JSON pointer must be empty or begin with '/' - was: '", reference_string, "'"), nullptr));
+            throw_missing_slash(reference_string);
         }
 
         // the whole string is validated, whether or not it matches
@@ -21057,7 +21110,7 @@ class json_pointer
         {
             if (JSON_HEDLEY_UNLIKELY(pos == size - 1 || (reference_string[pos + 1] != '0' && reference_string[pos + 1] != '1')))
             {
-                JSON_THROW(detail::parse_error::create(detail::exception_id::pointer_invalid_escape, 0, "escape character '~' must be followed with '0' or '1'", nullptr));
+                throw_invalid_escape();
             }
         }
 
@@ -21373,17 +21426,14 @@ class json_pointer
                     if (JSON_HEDLEY_UNLIKELY(reference_token == "-"))
                     {
                         // "-" always fails the range check
-                        JSON_THROW(detail::out_of_range::create(detail::exception_id::pointer_past_the_end_index, detail::concat(
-                                "array index '-' (", std::to_string(ptr->m_data.m_value.array->size()),
-                                ") is out of range"), ptr));
+                        throw_past_the_end(ptr->m_data.m_value.array->size(), ptr);
                     }
 
                     const auto idx = array_index<BasicJsonType>(reference_token);
                     // Bounds check before access to avoid exception with JSON_NOEXCEPTION
                     if (JSON_HEDLEY_UNLIKELY(idx >= ptr->m_data.m_value.array->size()))
                     {
-                        JSON_THROW(detail::out_of_range::create(detail::exception_id::array_index_out_of_range, detail::concat(
-                                "array index ", std::to_string(idx), " is out of range"), ptr));
+                        throw_index_out_of_range(idx, ptr);
                     }
                     ptr = &(*ptr->m_data.m_value.array)[idx];
                     break;
@@ -21444,7 +21494,7 @@ class json_pointer
                     if (JSON_HEDLEY_UNLIKELY(reference_token == "-"))
                     {
                         // "-" cannot be used for const access
-                        JSON_THROW(detail::out_of_range::create(detail::exception_id::pointer_past_the_end_index, detail::concat("array index '-' (", std::to_string(ptr->m_data.m_value.array->size()), ") is out of range"), ptr));
+                        throw_past_the_end(ptr->m_data.m_value.array->size(), ptr);
                     }
 
                     // use unchecked array access; the const operator[]
@@ -21516,12 +21566,10 @@ class json_pointer
                     typename BasicJsonType::size_type idx{};
                     switch (parse_array_index<BasicJsonType>(reference_token, idx))
                     {
-                        // the branches differ in their messages, not after JSON_THROW's expansion
-                        // NOLINTNEXTLINE(bugprone-branch-clone)
                         case array_index_status::leading_zero:
-                            JSON_THROW(detail::parse_error::create(detail::exception_id::pointer_index_leading_zero, 0, detail::concat("array index '", reference_token, "' must not begin with '0'"), nullptr));
+                            throw_leading_zero(reference_token);
                         case array_index_status::not_a_number:
-                            JSON_THROW(detail::parse_error::create(detail::exception_id::pointer_index_not_a_number, 0, detail::concat("array index '", reference_token, "' is not a number"), nullptr));
+                            throw_not_a_number(reference_token);
                         case array_index_status::unresolved:
                         case array_index_status::exceeds_size_type:
                             return nullptr;
@@ -21649,7 +21697,7 @@ class json_pointer
         // check if a nonempty reference string begins with slash
         if (JSON_HEDLEY_UNLIKELY(reference_string[0] != '/'))
         {
-            JSON_THROW(detail::parse_error::create(detail::exception_id::pointer_missing_slash, 1, detail::concat("JSON pointer must be empty or begin with '/' - was: '", reference_string, "'"), nullptr));
+            throw_missing_slash(reference_string);
         }
 
         // every slash starts a reference token
@@ -21696,7 +21744,7 @@ class json_pointer
                                              (reference_token[pos + 1] != '0' &&
                                               reference_token[pos + 1] != '1')))
                     {
-                        JSON_THROW(detail::parse_error::create(detail::exception_id::pointer_invalid_escape, 0, "escape character '~' must be followed with '0' or '1'", nullptr));
+                        throw_invalid_escape();
                     }
                 }
 
